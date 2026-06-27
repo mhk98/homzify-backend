@@ -39,8 +39,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:5173",
-  "https://dashboard-deen.netlify.app",
-  "https://deen-commerce.vercel.app",
+  " https://homzify.net",
+  "https://admin.homzify.net",
 ];
 
 const ALLOWED_ORIGINS = new Set(
