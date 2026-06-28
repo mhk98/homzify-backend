@@ -260,6 +260,11 @@ const ensureUserDocumentColumns = async () => {
   await maybeAddColumn("guardianIdCard");
 };
 
+const hasColumn = (tableDefinition, columnName) =>
+  Object.keys(tableDefinition).some(
+    (existingName) => existingName.toLowerCase() === columnName.toLowerCase(),
+  );
+
 const ensureSupplierStatusNoteColumns = async () => {
   const queryInterface = db.sequelize.getQueryInterface();
   const tableName = db.supplier.getTableName();
@@ -279,23 +284,122 @@ const ensureSupplierStatusNoteColumns = async () => {
   }
 };
 
-const ensureProductStatusNoteColumns = async () => {
+const ensureSupplierHistoryColumns = async () => {
   const queryInterface = db.sequelize.getQueryInterface();
-  const tableName = db.product.getTableName();
+  const tableName = db.supplierHistory.getTableName();
   const tableDefinition = await queryInterface.describeTable(tableName);
-  if (!tableDefinition.note) {
-    await queryInterface.addColumn(tableName, "note", {
-      type: DataTypes.STRING,
+  if (!hasColumn(tableDefinition, "supplierId")) {
+    await queryInterface.addColumn(tableName, "supplierId", {
+      type: DataTypes.INTEGER(10),
       allowNull: true,
     });
   }
-  if (!tableDefinition.status) {
+};
+
+const ensureSubcategoryTableCompatibility = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.subcategory.getTableName();
+  const tableDefinition = await queryInterface.describeTable(tableName);
+
+  if (!hasColumn(tableDefinition, "status")) {
     await queryInterface.addColumn(tableName, "status", {
       type: DataTypes.STRING(32),
-      allowNull: true,
+      allowNull: false,
       defaultValue: "Active",
     });
   }
+
+  const tables = await queryInterface.showAllTables();
+  const hasLegacyTable = tables.some((name) => String(name) === "Subcategories");
+  if (!hasLegacyTable || tableName === "Subcategories") return;
+
+  await db.sequelize.query(`
+    INSERT IGNORE INTO \`SubCategories\`
+      (\`Id\`, \`name\`, \`categoryId\`, \`status\`, \`deletedAt\`, \`createdAt\`, \`updatedAt\`)
+    SELECT
+      \`Id\`,
+      \`name\`,
+      \`categoryId\`,
+      COALESCE(\`status\`, 'Active'),
+      \`deletedAt\`,
+      \`createdAt\`,
+      \`updatedAt\`
+    FROM \`Subcategories\`
+  `);
+};
+
+const ensureProductStatusNoteColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.product.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("slug", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("sku", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("subcategoryId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("childcategoryId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("brandId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("productVideo", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("advanceAmount", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
+  await maybeAdd("stockAlert", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("description", { type: DataTypes.TEXT, allowNull: true });
+  await maybeAdd("shortDescription", { type: DataTypes.TEXT, allowNull: true });
+  await maybeAdd("metaTitle", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("metaKeyword", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("metaDescription", { type: DataTypes.TEXT, allowNull: true });
+  await maybeAdd("giftTitle", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("giftPrice", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
+  await maybeAdd("giftImage", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("images", { type: DataTypes.JSON, allowNull: true });
+  await maybeAdd("bestDeals", {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: false,
+  });
+  await maybeAdd("freeShipping", {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: false,
+  });
+  await maybeAdd("note", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("status", {
+    type: DataTypes.STRING(32),
+    allowNull: true,
+    defaultValue: "Active",
+  });
+};
+
+const ensureVariationStorefrontColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.variation.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("colorId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("colorImage", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("attribute", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("purchasePrice", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
+  await maybeAdd("oldPrice", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
+  await maybeAdd("newPrice", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
+  await maybeAdd("stock", {
+    type: DataTypes.INTEGER(10),
+    allowNull: true,
+    defaultValue: 0,
+  });
+  await maybeAdd("sku", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("availability", {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    defaultValue: "in stock",
+  });
 };
 
 const ensureCategoryFrontendColumns = async () => {
@@ -335,6 +439,156 @@ const ensureCategoryFrontendColumns = async () => {
   });
   await maybeAdd("metaTitle", { type: DataTypes.STRING, allowNull: true });
   await maybeAdd("metaDescription", { type: DataTypes.TEXT, allowNull: true });
+};
+
+const ensureBrandColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.brand.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+  const maybeChange = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (hasColumn(tableDefinition, columnName)) {
+      await queryInterface.changeColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("file", { type: DataTypes.TEXT("long"), allowNull: true });
+  await maybeAdd("linkUrl", { type: DataTypes.STRING(512), allowNull: true });
+  await maybeAdd("sortOrder", {
+    type: DataTypes.INTEGER(10),
+    allowNull: false,
+    defaultValue: 0,
+  });
+  await maybeAdd("isActive", {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  });
+  await maybeAdd("deletedAt", { type: DataTypes.DATE, allowNull: true });
+
+  await maybeChange("file", { type: DataTypes.TEXT("long"), allowNull: true });
+};
+
+const ensureNotificationColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.notification.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("title", {
+    type: DataTypes.STRING(160),
+    allowNull: false,
+    defaultValue: "Notification",
+  });
+  await maybeAdd("type", {
+    type: DataTypes.STRING(64),
+    allowNull: false,
+    defaultValue: "general",
+  });
+  await maybeAdd("priority", {
+    type: DataTypes.STRING(16),
+    allowNull: false,
+    defaultValue: "normal",
+  });
+  await maybeAdd("data", { type: DataTypes.JSON, allowNull: true });
+  await maybeAdd("readAt", { type: DataTypes.DATE, allowNull: true });
+};
+
+const ensureSiteSettingColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.siteSetting.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("settingType", { type: DataTypes.STRING(64), allowNull: true });
+  await maybeAdd("data", { type: DataTypes.JSON, allowNull: true });
+  await maybeAdd("deletedAt", { type: DataTypes.DATE, allowNull: true });
+
+  const tableDefinition = await queryInterface.describeTable(tableName);
+  const legacyColumns = [
+    "logoFile",
+    "marqueeText",
+    "address",
+    "phone",
+    "email",
+    "copyrightText",
+    "facebookUrl",
+    "instagramUrl",
+    "youtubeUrl",
+    "whatsappUrl",
+    "messengerUrl",
+    "deliveryPartnerFile",
+  ].filter((columnName) => hasColumn(tableDefinition, columnName));
+
+  const rows = await db.siteSetting.findAll({
+    attributes: ["Id", "settingType", "data", ...legacyColumns],
+    where: { settingType: null },
+    raw: true,
+    paranoid: false,
+  });
+
+  for (const row of rows) {
+    const data = legacyColumns.reduce((acc, columnName) => {
+      if (row[columnName] !== undefined && row[columnName] !== null && row[columnName] !== "") {
+        acc[columnName] = row[columnName];
+      }
+      return acc;
+    }, {});
+    await db.siteSetting.update(
+      { settingType: "general", data: row.data || data },
+      { where: { Id: row.Id }, paranoid: false },
+    );
+  }
+
+  await queryInterface.changeColumn(tableName, "settingType", {
+    type: DataTypes.STRING(64),
+    allowNull: false,
+  });
+};
+
+const ensureBannerColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.banner.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("categoryId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("categoryName", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("status", {
+    type: DataTypes.STRING(32),
+    allowNull: false,
+    defaultValue: "Active",
+  });
+  await maybeAdd("deletedAt", { type: DataTypes.DATE, allowNull: true });
+
+  const tableDefinition = await queryInterface.describeTable(tableName);
+  if (hasColumn(tableDefinition, "type")) {
+    await db.sequelize.query(
+      `UPDATE \`${tableName}\` SET categoryName = type WHERE categoryName IS NULL AND type IS NOT NULL`,
+    );
+  }
+  if (hasColumn(tableDefinition, "isActive")) {
+    await db.sequelize.query(
+      `UPDATE \`${tableName}\` SET status = CASE WHEN isActive = 0 THEN 'Inactive' ELSE 'Active' END WHERE status IS NULL OR TRIM(status) = ''`,
+    );
+  }
 };
 
 const ensurePurchaseRequisitionItemsColumn = async () => {
@@ -473,15 +727,22 @@ const ensureOrderStatusColumn = async () => {
 // Sync
 // =====================
 
-db.sequelize
+db.ready = db.sequelize
   .sync({ force: false })
   .then(async () => {
     await ensureUserRoleColumn();
     await ensureUserStatusColumn();
     await ensureUserDocumentColumns();
+    await ensureNotificationColumns();
     await ensureSupplierStatusNoteColumns();
+    await ensureSupplierHistoryColumns();
+    await ensureSubcategoryTableCompatibility();
     await ensureProductStatusNoteColumns();
+    await ensureVariationStorefrontColumns();
     await ensureCategoryFrontendColumns();
+    await ensureBrandColumns();
+    await ensureSiteSettingColumns();
+    await ensureBannerColumns();
     await ensurePurchaseRequisitionItemsColumn();
     await ensurePurchaseRequisitionExtraColumns();
     await ensureOrderIpAddressColumn();
@@ -489,6 +750,9 @@ db.sequelize
     await ensureLandingPageContentColumns();
     console.log("Connection re-synced successfully");
   })
-  .catch((err) => console.error("Error on re-sync:", err));
+  .catch((err) => {
+    console.error("Error on re-sync:", err);
+    throw err;
+  });
 
 module.exports = db;
