@@ -310,7 +310,9 @@ const ensureSubcategoryTableCompatibility = async () => {
   }
 
   const tables = await queryInterface.showAllTables();
-  const hasLegacyTable = tables.some((name) => String(name) === "Subcategories");
+  const hasLegacyTable = tables.some(
+    (name) => String(name) === "Subcategories",
+  );
   if (!hasLegacyTable || tableName === "Subcategories") return;
 
   await db.sequelize.query(`
@@ -340,19 +342,40 @@ const ensureProductStatusNoteColumns = async () => {
 
   await maybeAdd("slug", { type: DataTypes.STRING, allowNull: true });
   await maybeAdd("sku", { type: DataTypes.STRING, allowNull: true });
-  await maybeAdd("subcategoryId", { type: DataTypes.INTEGER(10), allowNull: true });
-  await maybeAdd("childcategoryId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("subcategoryId", {
+    type: DataTypes.INTEGER(10),
+    allowNull: true,
+  });
+  await maybeAdd("childcategoryId", {
+    type: DataTypes.INTEGER(10),
+    allowNull: true,
+  });
   await maybeAdd("brandId", { type: DataTypes.INTEGER(10), allowNull: true });
-  await maybeAdd("productVideo", { type: DataTypes.STRING(500), allowNull: true });
-  await maybeAdd("advanceAmount", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
-  await maybeAdd("stockAlert", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("productVideo", {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+  });
+  await maybeAdd("advanceAmount", {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true,
+  });
+  await maybeAdd("stockAlert", {
+    type: DataTypes.INTEGER(10),
+    allowNull: true,
+  });
   await maybeAdd("description", { type: DataTypes.TEXT, allowNull: true });
   await maybeAdd("shortDescription", { type: DataTypes.TEXT, allowNull: true });
   await maybeAdd("metaTitle", { type: DataTypes.STRING(500), allowNull: true });
-  await maybeAdd("metaKeyword", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("metaKeyword", {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+  });
   await maybeAdd("metaDescription", { type: DataTypes.TEXT, allowNull: true });
   await maybeAdd("giftTitle", { type: DataTypes.STRING(500), allowNull: true });
-  await maybeAdd("giftPrice", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
+  await maybeAdd("giftPrice", {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true,
+  });
   await maybeAdd("giftImage", { type: DataTypes.STRING(500), allowNull: true });
   await maybeAdd("images", { type: DataTypes.JSON, allowNull: true });
   await maybeAdd("bestDeals", {
@@ -384,11 +407,23 @@ const ensureVariationStorefrontColumns = async () => {
   };
 
   await maybeAdd("colorId", { type: DataTypes.INTEGER(10), allowNull: true });
-  await maybeAdd("colorImage", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("colorImage", {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+  });
   await maybeAdd("attribute", { type: DataTypes.STRING(500), allowNull: true });
-  await maybeAdd("purchasePrice", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
-  await maybeAdd("oldPrice", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
-  await maybeAdd("newPrice", { type: DataTypes.DECIMAL(12, 2), allowNull: true });
+  await maybeAdd("purchasePrice", {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true,
+  });
+  await maybeAdd("oldPrice", {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true,
+  });
+  await maybeAdd("newPrice", {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true,
+  });
   await maybeAdd("stock", {
     type: DataTypes.INTEGER(10),
     allowNull: true,
@@ -513,7 +548,10 @@ const ensureSiteSettingColumns = async () => {
     }
   };
 
-  await maybeAdd("settingType", { type: DataTypes.STRING(64), allowNull: true });
+  await maybeAdd("settingType", {
+    type: DataTypes.STRING(64),
+    allowNull: true,
+  });
   await maybeAdd("data", { type: DataTypes.JSON, allowNull: true });
   await maybeAdd("deletedAt", { type: DataTypes.DATE, allowNull: true });
 
@@ -542,7 +580,11 @@ const ensureSiteSettingColumns = async () => {
 
   for (const row of rows) {
     const data = legacyColumns.reduce((acc, columnName) => {
-      if (row[columnName] !== undefined && row[columnName] !== null && row[columnName] !== "") {
+      if (
+        row[columnName] !== undefined &&
+        row[columnName] !== null &&
+        row[columnName] !== ""
+      ) {
         acc[columnName] = row[columnName];
       }
       return acc;
@@ -569,7 +611,10 @@ const ensureBannerColumns = async () => {
     }
   };
 
-  await maybeAdd("categoryId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("categoryId", {
+    type: DataTypes.INTEGER(10),
+    allowNull: true,
+  });
   await maybeAdd("categoryName", { type: DataTypes.STRING, allowNull: true });
   await maybeAdd("status", {
     type: DataTypes.STRING(32),
