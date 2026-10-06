@@ -21,6 +21,11 @@ const getOneFromDB = catchAsync(async (req, res) => {
   sendResponse(res, { statusCode: 200, success: true, message: "Landing page fetched", data: result });
 });
 
+const getPublicOneFromDB = catchAsync(async (req, res) => {
+  const result = await Service.getPublicOneFromDB(req.params.id);
+  sendResponse(res, { statusCode: 200, success: true, message: "Landing page fetched", data: result });
+});
+
 const updateOneFromDB = catchAsync(async (req, res) => {
   const result = await Service.updateOneFromDB(req.params.id, req.body);
   sendResponse(res, { statusCode: 200, success: true, message: "Landing page updated", data: result });
@@ -55,6 +60,7 @@ module.exports = {
   insertIntoDB,
   getAllFromDB,
   getOneFromDB,
+  getPublicOneFromDB,
   updateOneFromDB,
   deleteIdFromDB,
   getHeaderFromDB,

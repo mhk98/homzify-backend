@@ -12,7 +12,13 @@ const normalizePayload = (data = {}) => {
   return {
     conversionId,
     conversionLabel,
+    conversionActionId: String(data.conversionActionId || "").trim() || null,
     customerId: String(data.customerId || "").trim() || null,
+    developerToken: String(data.developerToken || "").trim() || null,
+    clientId: String(data.clientId || "").trim() || null,
+    clientSecret: String(data.clientSecret || "").trim() || null,
+    refreshToken: String(data.refreshToken || "").trim() || null,
+    loginCustomerId: String(data.loginCustomerId || "").trim() || null,
     status: data.status === false || data.status === "Inactive" ? "Inactive" : "Active",
   };
 };
@@ -51,6 +57,7 @@ const getPublicFromDB = async () => {
       Id: plain.Id,
       conversionId: plain.conversionId,
       conversionLabel: plain.conversionLabel,
+      conversionActionId: plain.conversionActionId,
       status: plain.status,
     };
   });
@@ -59,7 +66,14 @@ const getPublicFromDB = async () => {
 const updateOneFromDB = async (id, payload) => {
   const row = await M().findOne({ where: { Id: id } });
   if (!row) throw new ApiError(404, "Google Ads config not found");
-  const data = normalizePayload({ ...row.get({ plain: true }), ...payload });
+  const current = row.get({ plain: true });
+  const merged = { ...current, ...payload };
+  ["developerToken", "clientId", "clientSecret", "refreshToken", "loginCustomerId"].forEach((key) => {
+    if (payload[key] !== undefined && !String(payload[key] || "").trim()) {
+      merged[key] = current[key];
+    }
+  });
+  const data = normalizePayload(merged);
   await ensureUnique(data.conversionId, data.conversionLabel, row.Id);
   await row.update(data);
   return row;

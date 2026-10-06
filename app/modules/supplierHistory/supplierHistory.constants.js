@@ -4,9 +4,17 @@ const SupplierHistoryFilterAbleFileds = [
   "endDate",
   "bookId",
   "supplierId",
+  "status",
 ];
 
-const SupplierHistorySearchableFields = [""];
+const SupplierHistorySearchableFields = [
+  "paymentTitle",
+  "method",
+  "sender",
+  "transactionId",
+  "description",
+  "file",
+];
 
 module.exports = {
   SupplierHistoryFilterAbleFileds,

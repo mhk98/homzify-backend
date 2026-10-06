@@ -10,14 +10,21 @@ const hash = (value) => {
   return crypto.createHash("sha256").update(normalized).digest("hex");
 };
 
-const hashPhone = (value) => hash(String(value || "").replace(/\D/g, ""));
+const hashPhone = (value) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  return hash(/^01\d{9}$/.test(digits) ? `88${digits}` : digits);
+};
 const asHashArray = (value) => value ? [value] : undefined;
 
 const PLATFORM_EVENT_NAMES = {
   PageView: { meta: "PageView", tiktok: "Pageview" },
   ViewContent: { meta: "ViewContent", tiktok: "ViewContent" },
-  InitiateCheckout: { meta: "InitiateCheckout", tiktok: "InitiateCheckout" },
+  Search: { meta: "Search", tiktok: "Search" },
   AddToCart: { meta: "AddToCart", tiktok: "AddToCart" },
+  InitiateCheckout: { meta: "InitiateCheckout", tiktok: "InitiateCheckout" },
+  AddPaymentInfo: { meta: "AddPaymentInfo", tiktok: "AddPaymentInfo" },
+  Lead: { meta: "Lead", tiktok: "SubmitForm" },
+  Contact: { meta: "Contact", tiktok: "Contact" },
   Purchase: { meta: "Purchase", tiktok: "CompletePayment" },
 };
 
@@ -32,9 +39,10 @@ const postJson = async (url, payload, headers = {}) => {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10000),
   });
   const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, data };
+  return { ok: res.ok && !data.error && !data.partialFailureError && (!('code' in data) || Number(data.code) === 0), status: res.status, data };
 };
 
 const toMetaEvent = ({ eventName, eventId, eventSourceUrl, userData, customData, ipAddress, userAgent }) => ({
@@ -70,7 +78,7 @@ const sendMeta = async (payload, context) => {
         eventName: getPlatformEventName(payload.eventName, "meta"),
         ...context,
       })],
-      ...(row.testEventId ? { test_event_code: row.testEventId } : {}),
+      ...(process.env.NODE_ENV !== "production" && row.testEventId ? { test_event_code: row.testEventId } : {}),
     };
     results.push({ platform: "meta", pixelId: row.pixelsId, ...(await postJson(url, body)) });
   }
@@ -105,7 +113,7 @@ const sendTiktok = async (payload, context) => {
       event_source: "web",
       event_source_id: row.pixelCode,
       data: [toTiktokEvent({ ...payload, ...context })],
-      ...(row.testEventCode ? { test_event_code: row.testEventCode } : {}),
+      ...(process.env.NODE_ENV !== "production" && row.testEventCode ? { test_event_code: row.testEventCode } : {}),
     };
     results.push({
       platform: "tiktok",
@@ -113,6 +121,93 @@ const sendTiktok = async (payload, context) => {
       ...(await postJson("https://business-api.tiktok.com/open_api/v1.3/event/track/", body, {
         "Access-Token": row.accessToken,
       })),
+    });
+  }
+  return results;
+};
+
+const getGoogleAccessToken = async (config = {}) => {
+  const clientId = config.clientId || process.env.GOOGLE_ADS_CLIENT_ID;
+  const clientSecret = config.clientSecret || process.env.GOOGLE_ADS_CLIENT_SECRET;
+  const refreshToken = config.refreshToken || process.env.GOOGLE_ADS_REFRESH_TOKEN;
+  if (!clientId || !clientSecret || !refreshToken) return null;
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
+    grant_type: "refresh_token",
+  });
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) {
+    throw new Error(data.error_description || data.error || "Google Ads token request failed");
+  }
+  return data.access_token;
+};
+
+const getGoogleClickId = (userData = {}) =>
+  userData.gclid || userData.gbraid || userData.wbraid || null;
+
+const sendGoogleAds = async (payload) => {
+  if (payload.eventName !== "Purchase") return [];
+
+  const configs = await GoogleAdsService.getActiveFromDB();
+  const results = [];
+  for (const config of configs) {
+    const row = config.toJSON();
+    const developerToken = row.developerToken || process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+    const accessToken = await getGoogleAccessToken(row);
+    if (!developerToken || !accessToken) {
+      results.push({
+        platform: "google_ads",
+        conversionId: row.conversionId,
+        ok: false,
+        skipped: true,
+        reason: "Google Ads server credentials are not configured",
+      });
+      continue;
+    }
+    const customerId = String(row.customerId || process.env.GOOGLE_ADS_CUSTOMER_ID || "").replace(/\D/g, "");
+    const conversionActionId = String(row.conversionActionId || process.env.GOOGLE_ADS_CONVERSION_ACTION_ID || "").trim();
+    const clickId = getGoogleClickId(payload.userData);
+    if (!customerId || !conversionActionId || !clickId) {
+      results.push({
+        platform: "google_ads",
+        conversionId: row.conversionId,
+        ok: false,
+        skipped: true,
+        reason: "Missing customerId, conversionActionId, or Google click id",
+      });
+      continue;
+    }
+
+    const conversion = {
+      conversionAction: `customers/${customerId}/conversionActions/${conversionActionId}`,
+      conversionDateTime: new Date().toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "+00:00"),
+      conversionValue: Number(payload.customData?.value || 0),
+      currencyCode: payload.customData?.currency || "BDT",
+      orderId: String(payload.customData?.order_id || payload.eventId),
+      ...(payload.userData?.gclid ? { gclid: payload.userData.gclid } : {}),
+      ...(payload.userData?.gbraid ? { gbraid: payload.userData.gbraid } : {}),
+      ...(payload.userData?.wbraid ? { wbraid: payload.userData.wbraid } : {}),
+    };
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      "developer-token": developerToken,
+    };
+    const loginCustomerId = String(row.loginCustomerId || process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || "").replace(/\D/g, "");
+    if (loginCustomerId) headers["login-customer-id"] = loginCustomerId;
+
+    const url = `https://googleads.googleapis.com/v17/customers/${customerId}:uploadClickConversions`;
+    results.push({
+      platform: "google_ads",
+      conversionId: row.conversionId,
+      ...(await postJson(url, { conversions: [conversion], partialFailure: true }, headers)),
     });
   }
   return results;
@@ -136,11 +231,12 @@ const trackEvent = async (payload, req) => {
     userAgent: req.headers["user-agent"],
   };
   const basePayload = { ...payload, eventName, eventId };
-  const [meta, tiktok] = await Promise.all([
+  const [meta, tiktok, googleAds] = await Promise.all([
     sendMeta(basePayload, context).catch((error) => [{ platform: "meta", ok: false, error: error.message }]),
     sendTiktok(basePayload, context).catch((error) => [{ platform: "tiktok", ok: false, error: error.message }]),
+    sendGoogleAds(basePayload).catch((error) => [{ platform: "google_ads", ok: false, error: error.message }]),
   ]);
-  return { eventId, results: [...meta, ...tiktok] };
+  return { eventId, results: [...meta, ...tiktok, ...googleAds] };
 };
 
 module.exports = { getPublicConfig, trackEvent };

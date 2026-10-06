@@ -1,9 +1,10 @@
 const db = require("../../../models");
 const ApiError = require("../../../error/ApiError");
+const { replaceInlineImages } = require("../../../helpers/inlineImages");
 
 const VALID_TYPES = [
   "general", "social_media", "contact",
-  "courier_api", "payment_gateway", "sms_gateway", "fraud_checker", "header", "footer", "website_footer",
+  "courier_api", "payment_gateway", "sms_gateway", "fraud_checker", "header", "footer", "website_footer", "order_block",
 ];
 
 const validateType = (settingType) => {
@@ -177,9 +178,11 @@ const getPublic = async () => {
 const upsert = async (settingType, payload) => {
   const type = validateType(settingType);
   const rawData = payload?.data ?? payload;
-  const data = type === "social_media"
-    ? normalizeSocialMediaStorage(rawData)
-    : normalizeSettingData(rawData);
+  const data = await replaceInlineImages(
+    type === "social_media"
+      ? normalizeSocialMediaStorage(rawData)
+      : normalizeSettingData(rawData),
+  );
   const [row] = await db.siteSetting.findOrCreate({
     where: { settingType: type },
     defaults: { settingType: type, data },

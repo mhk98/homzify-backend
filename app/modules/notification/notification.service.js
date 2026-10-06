@@ -6,10 +6,17 @@ const { emitToUser } = require("../../realtime/socket");
 
 const Notification = () => db.notification;
 
+const unreadWhere = (userId) => ({
+  userId,
+  [Op.or]: [{ isRead: false }, { isRead: null }],
+});
+
 const getMine = async (userId, filters = {}, options = {}) => {
   const { page, limit, skip } = paginationHelpers.calculatePagination(options);
   const where = { userId };
-  if (filters.unreadOnly === true || filters.unreadOnly === "true") where.isRead = false;
+  if (filters.unreadOnly === true || filters.unreadOnly === "true") {
+    Object.assign(where, unreadWhere(userId));
+  }
   const { count, rows } = await Notification().findAndCountAll({
     where,
     limit,
@@ -19,21 +26,24 @@ const getMine = async (userId, filters = {}, options = {}) => {
   return { meta: { page, limit, count }, data: rows };
 };
 
-const getUnreadCount = async (userId) => Notification().count({ where: { userId, isRead: false } });
+const getUnreadCount = async (userId) => Notification().count({ where: unreadWhere(userId) });
 
 const markAsRead = async (userId, id) => {
+  const [updated] = await Notification().update(
+    { isRead: true, readAt: new Date() },
+    { where: { Id: id, userId } },
+  );
   const row = await Notification().findOne({ where: { Id: id, userId } });
   if (!row) throw new ApiError(404, "Notification not found");
-  if (!row.isRead) await row.update({ isRead: true, readAt: new Date() });
   const unreadCount = await getUnreadCount(userId);
   emitToUser(userId, "notification:read", { id: row.Id, unreadCount });
-  return { notification: row, unreadCount };
+  return { notification: row, updated, unreadCount };
 };
 
 const markAllAsRead = async (userId) => {
   const [updated] = await Notification().update(
     { isRead: true, readAt: new Date() },
-    { where: { userId, isRead: false } },
+    { where: unreadWhere(userId) },
   );
   emitToUser(userId, "notification:read-all", { unreadCount: 0 });
   return { updated, unreadCount: 0 };

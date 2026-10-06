@@ -84,6 +84,15 @@ db.expense = require("../app/modules/expense/expense.model")(
 
 // Orders
 db.order = require("../app/modules/order/order.model")(db.sequelize, DataTypes);
+db.orderFraudCheck = require("../app/modules/order/orderFraudCheck.model")(
+  db.sequelize,
+  DataTypes,
+);
+
+// Serialize draft/final writes across API processes, including invoice allocation.
+db.orderWriteLock = db.sequelize.define("OrderWriteLock", {
+  Id: { type: DataTypes.INTEGER, primaryKey: true },
+}, { timestamps: false });
 
 // Charge Settings (4 sub-models)
 db.codCharge = require("../app/modules/chargeSetting/codCharge.model")(
@@ -168,6 +177,31 @@ db.landingPage = require("../app/modules/landingPage/landingPage.model")(
 
 db.user.hasMany(db.notification, { foreignKey: "userId", as: "notifications" });
 db.notification.belongsTo(db.user, { foreignKey: "userId", as: "user" });
+
+db.order.hasOne(db.orderFraudCheck, {
+  foreignKey: "orderId",
+  as: "fraudCheck",
+});
+db.orderFraudCheck.belongsTo(db.order, {
+  foreignKey: "orderId",
+  as: "order",
+});
+db.user.hasMany(db.order, {
+  foreignKey: "assignedEmployeeId",
+  as: "assignedOrders",
+});
+db.order.belongsTo(db.user, {
+  foreignKey: "assignedEmployeeId",
+  as: "assignedEmployee",
+});
+db.user.hasMany(db.order, {
+  foreignKey: "assignedById",
+  as: "assignedByOrders",
+});
+db.order.belongsTo(db.user, {
+  foreignKey: "assignedById",
+  as: "assignedByUser",
+});
 
 db.expenseCategory.hasMany(db.expense, {
   foreignKey: "categoryId",
@@ -287,13 +321,20 @@ const ensureSupplierStatusNoteColumns = async () => {
 const ensureSupplierHistoryColumns = async () => {
   const queryInterface = db.sequelize.getQueryInterface();
   const tableName = db.supplierHistory.getTableName();
-  const tableDefinition = await queryInterface.describeTable(tableName);
-  if (!hasColumn(tableDefinition, "supplierId")) {
-    await queryInterface.addColumn(tableName, "supplierId", {
-      type: DataTypes.INTEGER(10),
-      allowNull: true,
-    });
-  }
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("supplierId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("paymentTitle", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("due", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("method", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("sender", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("transactionId", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("description", { type: DataTypes.TEXT, allowNull: true });
 };
 
 const ensureSubcategoryTableCompatibility = async () => {
@@ -412,6 +453,7 @@ const ensureVariationStorefrontColumns = async () => {
     allowNull: true,
   });
   await maybeAdd("attribute", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("options", { type: DataTypes.JSON, allowNull: true });
   await maybeAdd("purchasePrice", {
     type: DataTypes.DECIMAL(12, 2),
     allowNull: true,
@@ -601,6 +643,24 @@ const ensureSiteSettingColumns = async () => {
   });
 };
 
+const ensureGoogleAdsColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.googleAds.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("conversionActionId", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("developerToken", { type: DataTypes.TEXT, allowNull: true });
+  await maybeAdd("clientId", { type: DataTypes.TEXT, allowNull: true });
+  await maybeAdd("clientSecret", { type: DataTypes.TEXT, allowNull: true });
+  await maybeAdd("refreshToken", { type: DataTypes.TEXT, allowNull: true });
+  await maybeAdd("loginCustomerId", { type: DataTypes.STRING, allowNull: true });
+};
+
 const ensureBannerColumns = async () => {
   const queryInterface = db.sequelize.getQueryInterface();
   const tableName = db.banner.getTableName();
@@ -682,6 +742,11 @@ const ensureLandingPageContentColumns = async () => {
     }
   };
 
+  await maybeAdd("pageType", {
+    type: DataTypes.STRING(32),
+    allowNull: false,
+    defaultValue: "Campaign",
+  });
   await maybeAdd("productId", { type: DataTypes.INTEGER(10), allowNull: true });
   await maybeAdd("product", { type: DataTypes.STRING, allowNull: true });
   await maybeAdd("title", { type: DataTypes.STRING, allowNull: false });
@@ -716,6 +781,10 @@ const ensureLandingPageContentColumns = async () => {
   await maybeAdd("phone", { type: DataTypes.STRING, allowNull: true });
   await maybeAdd("template", { type: DataTypes.STRING, allowNull: true });
   await maybeAdd("countdown", { type: DataTypes.STRING(64), allowNull: true });
+  await maybeAdd("regularData", {
+    type: DataTypes.TEXT("long"),
+    allowNull: true,
+  });
   await maybeAdd("status", {
     type: DataTypes.BOOLEAN,
     allowNull: false,
@@ -749,6 +818,50 @@ const ensureOrderIpAddressColumn = async () => {
   }
 };
 
+const ensureOrderDeviceIdColumn = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.order.getTableName();
+  const tableDefinition = await queryInterface.describeTable(tableName);
+  if (!tableDefinition.deviceId) {
+    await queryInterface.addColumn(tableName, "deviceId", {
+      type: DataTypes.STRING(128),
+      allowNull: true,
+    });
+  }
+};
+
+const ensureOrderSourceColumn = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.order.getTableName();
+  const tableDefinition = await queryInterface.describeTable(tableName);
+  if (!tableDefinition.orderSource) {
+    await queryInterface.addColumn(tableName, "orderSource", {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    });
+  }
+};
+
+const ensureIpBlockCompatibilityColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.ipBlock.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("deviceId", {
+    type: DataTypes.STRING(128),
+    allowNull: true,
+  });
+  await maybeAdd("expiresAt", {
+    type: DataTypes.DATE,
+    allowNull: true,
+  });
+};
+
 const ensureOrderStatusColumn = async () => {
   const queryInterface = db.sequelize.getQueryInterface();
   const tableName = db.order.getTableName();
@@ -765,6 +878,62 @@ const ensureOrderStatusColumn = async () => {
     type: DataTypes.STRING(64),
     allowNull: false,
     defaultValue: "pending",
+  });
+};
+
+const ensureOrderFraudGuardColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.order.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("fraudStatus", {
+    type: DataTypes.STRING(32),
+    allowNull: true,
+  });
+  await maybeAdd("fraudReason", {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  });
+};
+
+const ensureOrderAssignmentColumns = async () => {
+  const queryInterface = db.sequelize.getQueryInterface();
+  const tableName = db.order.getTableName();
+  const maybeAdd = async (columnName, definition) => {
+    const tableDefinition = await queryInterface.describeTable(tableName);
+    if (!hasColumn(tableDefinition, columnName)) {
+      await queryInterface.addColumn(tableName, columnName, definition);
+    }
+  };
+
+  await maybeAdd("assignedEmployeeId", {
+    type: DataTypes.INTEGER(10),
+    allowNull: true,
+  });
+  await maybeAdd("assignedEmployeeName", {
+    type: DataTypes.STRING(191),
+    allowNull: true,
+  });
+  await maybeAdd("assignedById", {
+    type: DataTypes.INTEGER(10),
+    allowNull: true,
+  });
+  await maybeAdd("assignedByName", {
+    type: DataTypes.STRING(191),
+    allowNull: true,
+  });
+  await maybeAdd("assignedAt", {
+    type: DataTypes.DATE,
+    allowNull: true,
+  });
+  await maybeAdd("stockLedger", {
+    type: DataTypes.JSON,
+    allowNull: true,
   });
 };
 
@@ -787,11 +956,32 @@ db.ready = db.sequelize
     await ensureCategoryFrontendColumns();
     await ensureBrandColumns();
     await ensureSiteSettingColumns();
+    await ensureGoogleAdsColumns();
     await ensureBannerColumns();
     await ensurePurchaseRequisitionItemsColumn();
     await ensurePurchaseRequisitionExtraColumns();
+    await ensureIpBlockCompatibilityColumns();
+    const orderTable = db.order.getTableName();
+    const qi = db.sequelize.getQueryInterface();
+    const columns = await qi.describeTable(orderTable);
+    if (!columns.checkoutKey) {
+      await qi.addColumn(orderTable, "checkoutKey", {
+        type: DataTypes.STRING(128), allowNull: true,
+      });
+    }
+    const indexes = await qi.showIndex(orderTable);
+    if (!indexes.some((index) => index.name === "orders_checkout_key_unique")) {
+      await qi.addIndex(orderTable, ["checkoutKey"], {
+        name: "orders_checkout_key_unique", unique: true,
+      });
+    }
+    await db.orderWriteLock.findOrCreate({ where: { Id: 1 } });
     await ensureOrderIpAddressColumn();
+    await ensureOrderDeviceIdColumn();
+    await ensureOrderSourceColumn();
     await ensureOrderStatusColumn();
+    await ensureOrderFraudGuardColumns();
+    await ensureOrderAssignmentColumns();
     await ensureLandingPageContentColumns();
     console.log("Connection re-synced successfully");
   })

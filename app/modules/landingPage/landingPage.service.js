@@ -169,6 +169,7 @@ const normalizePayload = async (payload = {}) => {
   }
 
   return {
+    pageType: payload.pageType || "Campaign",
     productId,
     product,
     title: payload.title || payload.campaignTitle || product || "Untitled Campaign",
@@ -180,7 +181,7 @@ const normalizePayload = async (payload = {}) => {
       : null,
     shortDescription: payload.shortDescription || null,
     video: payload.video || null,
-    reviewTitle: payload.reviewTitle || null,
+    reviewTitle: payload.reviewTitle === undefined ? null : payload.reviewTitle,
     descriptionTitle: payload.descriptionTitle || null,
     description: payload.description || null,
     whyChooseTitle: payload.whyChooseTitle || null,
@@ -190,6 +191,9 @@ const normalizePayload = async (payload = {}) => {
     phone: payload.phone || null,
     template: payload.template || payload.campaignTemplate || "Template Design 1",
     countdown: payload.countdown || payload.countdownTime || null,
+    regularData: payload.regularData
+      ? (typeof payload.regularData === "string" ? payload.regularData : JSON.stringify(payload.regularData))
+      : null,
     status: payload.status === undefined ? true : Boolean(payload.status),
   };
 };
@@ -223,6 +227,15 @@ const getOneFromDB = async (id) => {
   return row;
 };
 
+const getPublicOneFromDB = async (id) => {
+  const row = await LandingPage().findOne({
+    where: { Id: id, status: true },
+    paranoid: true,
+  });
+  if (!row) throw new ApiError(404, "Landing page not found or inactive");
+  return row;
+};
+
 const updateOneFromDB = async (id, payload) => {
   const row = await LandingPage().findOne({ where: { Id: id } });
   if (!row) throw new ApiError(404, "Landing page not found");
@@ -242,6 +255,7 @@ module.exports = {
   insertIntoDB,
   getAllFromDB,
   getOneFromDB,
+  getPublicOneFromDB,
   updateOneFromDB,
   deleteIdFromDB,
   getHeaderFromDB,

@@ -2,6 +2,17 @@ const jwt = require("jsonwebtoken");
 const ApiError = require("../error/ApiError");
 require("dotenv").config();
 
+const getJwtSecret = (name) => {
+  const secret = String(process.env[name] || "").trim();
+  if (!secret) {
+    throw new ApiError(
+      500,
+      `JWT secret ${name} is not configured. Set ${name} in your environment.`,
+    );
+  }
+  return secret;
+};
+
 exports.generateToken = (userInfo, extraClaims = {}) => {
   try {
     const payload = {
@@ -11,7 +22,7 @@ exports.generateToken = (userInfo, extraClaims = {}) => {
       ...extraClaims,
     };
 
-    const token = jwt.sign(payload, process.env.TOKEN_SECRET, {
+    const token = jwt.sign(payload, getJwtSecret("TOKEN_SECRET"), {
       expiresIn: "2h",
     });
 
@@ -30,7 +41,7 @@ exports.generateRefreshToken = (userInfo) => {
       role: userInfo.role,
     };
 
-    const token = jwt.sign(payload, process.env.REFRESH_SECRET, {
+    const token = jwt.sign(payload, getJwtSecret("REFRESH_SECRET"), {
       expiresIn: "7d",
     });
 
@@ -43,7 +54,7 @@ exports.generateRefreshToken = (userInfo) => {
 
 exports.verifyRefreshToken = (token) => {
   try {
-    return jwt.verify(token, process.env.REFRESH_SECRET);
+    return jwt.verify(token, getJwtSecret("REFRESH_SECRET"));
   } catch (error) {
     throw new ApiError(401, "Invalid or expired refresh token");
   }

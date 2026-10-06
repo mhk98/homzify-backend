@@ -3,6 +3,7 @@ module.exports = (sequelize, DataTypes) => {
     "LandingPage",
     {
       Id: { type: DataTypes.INTEGER(10), primaryKey: true, autoIncrement: true, allowNull: false },
+      pageType: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "Campaign" },
       productId: { type: DataTypes.INTEGER(10), allowNull: true },
       product: { type: DataTypes.STRING, allowNull: true },
       title: { type: DataTypes.STRING, allowNull: false },
@@ -22,6 +23,7 @@ module.exports = (sequelize, DataTypes) => {
       phone: { type: DataTypes.STRING, allowNull: true },
       template: { type: DataTypes.STRING, allowNull: true },
       countdown: { type: DataTypes.STRING(64), allowNull: true },
+      regularData: { type: DataTypes.TEXT("long"), allowNull: true },
       status: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       deletedAt: { type: DataTypes.DATE, allowNull: true },
     },

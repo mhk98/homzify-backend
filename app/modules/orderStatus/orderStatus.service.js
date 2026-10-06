@@ -38,8 +38,10 @@ const getActiveStatusOptions = async () => {
     order: [["createdAt", "ASC"], ["Id", "ASC"]],
   });
 
-  const normalized = rows.map(normalizeRow).filter((row) => row.key);
-  if (!normalized.length) return DEFAULT_ORDER_STATUSES;
+  const normalized = [
+    ...DEFAULT_ORDER_STATUSES,
+    ...rows.map(normalizeRow).filter((row) => row.key),
+  ];
 
   const seen = new Set();
   return normalized.filter((row) => {

@@ -21,6 +21,47 @@ const STATUS_CONFIG = [
   { key: "incomplete", label: "Incomplete",         color: "#6366f1" },
 ];
 
+const SOURCE_COLORS = [
+  "#0f9f8f",
+  "#3b82f6",
+  "#ec4899",
+  "#f97316",
+  "#8b5cf6",
+  "#06b6d4",
+  "#84cc16",
+  "#64748b",
+  "#ef4444",
+  "#14b8a6",
+];
+
+const normalizeRole = (value) => String(value || "").trim().toLowerCase();
+
+const extractOrderSource = (order = {}) => {
+  const directSource = String(order.orderSource || "").trim();
+  if (directSource) return directSource;
+  if (!order.note || typeof order.note !== "string") return "No Source";
+  try {
+    const meta = JSON.parse(order.note);
+    return String(meta.orderSource || meta.source || meta.platform || "").trim() || "No Source";
+  } catch (error) {
+    return "No Source";
+  }
+};
+
+const applyOrderAssignmentScope = (where, user = {}) => {
+  const role = normalizeRole(user.role);
+  if (!user?.Id || role === "admin" || role === "superadmin") return where;
+  if (role === "employee") {
+    return {
+      [Op.and]: [
+        where,
+        { assignedEmployeeId: Number(user.Id) },
+      ],
+    };
+  }
+  return where;
+};
+
 const buildDateWhere = (fromDate, toDate) => {
   if (fromDate && toDate) return { orderDate: { [Op.between]: [fromDate, toDate] } };
   if (fromDate) return { orderDate: { [Op.gte]: fromDate } };
@@ -28,8 +69,8 @@ const buildDateWhere = (fromDate, toDate) => {
   return {};
 };
 
-const getDashboardStats = async ({ fromDate, toDate } = {}) => {
-  const dateWhere = buildDateWhere(fromDate, toDate);
+const getDashboardStats = async ({ fromDate, toDate } = {}, user = {}) => {
+  const dateWhere = applyOrderAssignmentScope(buildDateWhere(fromDate, toDate), user);
 
   // ── 1. Order aggregation by status ─────────────────────────────────────
   const statusRows = await db.order.findAll({
@@ -62,6 +103,45 @@ const getDashboardStats = async ({ fromDate, toDate } = {}) => {
     const { count = 0, bill = 0 } = statusMap[cfg.key] || {};
     const percent = grandCount > 0 ? Math.round((count / grandCount) * 100) : 0;
     return { status: cfg.key, label: cfg.label, count, totalBill: bill, percent, color: cfg.color };
+  });
+
+  const sourceOrderRows = await db.order.findAll({
+    attributes: ["orderSource", "note", "totalBill"],
+    where: dateWhere,
+    raw: true,
+    paranoid: true,
+  });
+
+  const sourceMap = {};
+  sourceOrderRows.forEach((order) => {
+    const source = extractOrderSource(order);
+    if (!sourceMap[source]) sourceMap[source] = { count: 0, totalBill: 0 };
+    sourceMap[source].count += 1;
+    sourceMap[source].totalBill += Number(order.totalBill || 0);
+  });
+
+  const ordersBySource = Object.entries(sourceMap)
+    .sort(([, a], [, b]) => b.count - a.count)
+    .map(([source, row], index) => {
+      const count = Number(row.count) || 0;
+      const totalBill = Number(row.totalBill) || 0;
+    return {
+      source,
+      label: source,
+      count,
+      totalBill,
+      percent: grandCount > 0 ? Math.round((count / grandCount) * 100) : 0,
+      color: SOURCE_COLORS[index % SOURCE_COLORS.length],
+    };
+  });
+
+  ordersBySource.push({
+    source: "total",
+    label: "Total",
+    count: grandCount,
+    totalBill: grandBill,
+    percent: 100,
+    color: "#111827",
   });
 
   // ── 2. Summary card numbers ─────────────────────────────────────────────
@@ -160,7 +240,7 @@ const getDashboardStats = async ({ fromDate, toDate } = {}) => {
     },
   ];
 
-  return { summary, ordersByStatus, salesChart, topProducts, deliveryStats };
+  return { summary, ordersByStatus, ordersBySource, salesChart, topProducts, deliveryStats };
 };
 
 module.exports = { getDashboardStats };

@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const http = require("http");
+const path = require("path");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const swaggerJsdoc = require("swagger-jsdoc");
@@ -14,10 +15,45 @@ const routes = require("./app/routes");
 const ApiError = require("./error/ApiError");
 const userLogHistory = require("./app/middlewares/userLogHistory");
 const { initializeChatSocket } = require("./app/realtime/socket");
+const {
+  isCloudinaryEnabled,
+  cloudinaryUrlForLegacyFile,
+} = require("./helpers/cloudinary");
+
+const {
+  createCourierSyncWorker,
+} = require("./app/modules/order/courierSync.worker");
+const courierSyncWorker = createCourierSyncWorker({
+  Order: db.order,
+  service: require("./app/modules/order/order.service"),
+});
 
 const app = express();
 const server = http.createServer(app);
 initializeChatSocket(server);
+
+let compression;
+try {
+  compression = require("compression");
+} catch (error) {
+  if (error.code !== "MODULE_NOT_FOUND") {
+    throw error;
+  }
+  console.warn(
+    "Optional dependency 'compression' is not installed; continuing without response compression.",
+  );
+}
+
+const requiredEnvVars = ["TOKEN_SECRET", "REFRESH_SECRET"];
+const missingEnvVars = requiredEnvVars.filter(
+  (key) => !String(process.env[key] || "").trim(),
+);
+if (missingEnvVars.length) {
+  console.error(
+    `Missing required environment variables: ${missingEnvVars.join(", ")}`,
+  );
+  process.exit(1);
+}
 
 const PORT = process.env.PORT || 5000;
 
@@ -32,6 +68,14 @@ app.use(
 );
 
 /* ========================
+   COMPRESSION (gzip JSON & static responses)
+======================== */
+
+if (compression) {
+  app.use(compression());
+}
+
+/* ========================
    CORS
 ======================== */
 
@@ -39,8 +83,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:5173",
-  " https://homzify.net",
-  "https://admin.homzify.net",
+  "https://api.holydeen.com",
+  "https://admin.holydeen.com",
 ];
 
 const ALLOWED_ORIGINS = new Set(
@@ -59,7 +103,10 @@ const corsOptions = {
     if (!origin) return callback(null, true);
 
     const normalizedOrigin = origin.replace(/\/+$/, "");
-    if (ALLOWED_ORIGINS.has(normalizedOrigin) || isLocalDevOrigin(normalizedOrigin))
+    if (
+      ALLOWED_ORIGINS.has(normalizedOrigin) ||
+      isLocalDevOrigin(normalizedOrigin)
+    )
       return callback(null, normalizedOrigin);
 
     return callback(null, false);
@@ -108,8 +155,18 @@ app.use("/api/v1", apiLimiter);
    MIDDLEWARE
 ======================== */
 
+const captureRawBodyForWebhooks = (req, res, buffer) => {
+  const webhookPath = req.originalUrl?.split("?")[0]?.replace(/\/+$/, "");
+  if (
+    webhookPath === "/api/v1/integrations/woocommerce/orders" ||
+    webhookPath === "/api/v1/integrations/woocommerce/products"
+  ) {
+    req.rawBody = Buffer.from(buffer);
+  }
+};
+
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "25mb", verify: captureRawBodyForWebhooks }));
 app.use(cookieParser());
 app.use(userLogHistory);
 
@@ -117,7 +174,19 @@ app.use(userLogHistory);
    STATIC FILES
 ======================== */
 
-app.use("/images", express.static("images"));
+app.use("/images", express.static(process.env.UPLOAD_DIR || "images"));
+
+// Older records store only "<uuid>.<ext>". Once those files are migrated to
+// Cloudinary (tools/migrateUploadsToCloudinary.js) they no longer exist on
+// disk, so redirect to the Cloudinary copy that keeps the same name.
+if (isCloudinaryEnabled) {
+  app.get("/images/:name", (req, res, next) => {
+    const name = path.basename(req.params.name);
+    const ext = path.extname(name).toLowerCase();
+    if (!ext) return next();
+    res.redirect(301, cloudinaryUrlForLegacyFile(name, ext));
+  });
+}
 
 /* ========================
    SWAGGER DOCS
@@ -266,6 +335,7 @@ const startServer = async () => {
 
     server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
+      courierSyncWorker.start();
     });
   } catch (error) {
     console.error("❌ Failed to connect to database:", error.message);
@@ -286,6 +356,7 @@ startServer();
 
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received. Shutting down gracefully...");
+  await courierSyncWorker.stop();
   await db.sequelize.close();
   server.close(() => {
     console.log("Server closed");
@@ -295,6 +366,7 @@ process.on("SIGTERM", async () => {
 
 process.on("SIGINT", async () => {
   console.log("SIGINT received. Shutting down gracefully...");
+  await courierSyncWorker.stop();
   await db.sequelize.close();
   server.close(() => {
     console.log("Server closed");

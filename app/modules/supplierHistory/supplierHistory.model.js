@@ -15,12 +15,36 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DATEONLY,
         allowNull: true,
       },
+      paymentTitle: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
       amount: {
+        type: DataTypes.INTEGER(10),
+        allowNull: true,
+      },
+      due: {
         type: DataTypes.INTEGER(10),
         allowNull: true,
       },
       supplierId: {
         type: DataTypes.INTEGER(10),
+        allowNull: true,
+      },
+      method: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      sender: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      transactionId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      description: {
+        type: DataTypes.TEXT,
         allowNull: true,
       },
       status: {

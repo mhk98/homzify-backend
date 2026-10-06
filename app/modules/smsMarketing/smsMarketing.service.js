@@ -30,7 +30,40 @@ const getRecipients = async (filter) => {
 
 const getSmsGatewaySettings = async () => {
   const row = await db.siteSetting.findOne({ where: { settingType: "sms_gateway" } });
-  return row?.data || {};
+  const data = normalizeSettingData(row?.data);
+  return {
+    ...data,
+    type: data.type || data.gatewayType || "",
+    apiToken: data.apiToken || data.apiKey || "",
+  };
+};
+
+const isNumericKeyMap = (value) => {
+  if (!value || Array.isArray(value) || typeof value !== "object") return false;
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((key) => /^\d+$/.test(key));
+};
+
+const normalizeSettingData = (value, depth = 0) => {
+  if (!value || depth > 5) return {};
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return {};
+    try {
+      return normalizeSettingData(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return {};
+    }
+  }
+  if (isNumericKeyMap(value)) {
+    const text = Object.keys(value)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((key) => value[key])
+      .join("");
+    return normalizeSettingData(text, depth + 1);
+  }
+  if (Array.isArray(value) || typeof value !== "object") return {};
+  return value;
 };
 
 // Normalize BD phone number to 880XXXXXXXXXX format
@@ -87,19 +120,39 @@ const sendViaSslWireless = async (settings, recipients, smsText) => {
 
 // BDBulkSMS gateway
 const sendViaBdBulkSms = async (settings, recipients, smsText) => {
-  const { username, password, senderId } = settings;
-  if (!username || !password) throw new ApiError(500, "BDBulkSMS: username and password are required in SMS gateway settings");
+  const apiKey = settings.apiKey || settings.api_key || settings.token || settings.apiToken || settings.password;
+  const senderId = String(settings.senderId || settings.senderid || "").trim().replace(/^\+/, "");
+  if (!apiKey) throw new ApiError(500, "BulkSMSBD: API key is required in SMS gateway settings");
+  if (!senderId) throw new ApiError(500, "BulkSMSBD: Sender ID is required in SMS gateway settings");
 
   const phones = recipients.map((r) => normalizePhone(r.phone)).join(",");
-  const params = new URLSearchParams({ username, password, number: phones, message: smsText, senderId: senderId || "8809617612045" });
-  const url = `http://api.bdbulksms.net/api.php?${params.toString()}`;
+  const params = new URLSearchParams({
+    api_key: apiKey,
+    type: "text",
+    number: phones,
+    senderid: senderId,
+    message: smsText,
+  });
+  const url = `https://bulksmsbd.net/api/smsapi?${params.toString()}`;
 
   const { status, body } = await httpRequest(url, { method: "GET" });
-  const sent = status === 200 && !body.toLowerCase().includes("error") ? recipients.length : 0;
+  const responseText = String(body || "");
+  let responseCode = "";
+  let providerMessage = "";
+  try {
+    const parsed = JSON.parse(responseText);
+    responseCode = String(parsed.response_code || parsed.code || "");
+    providerMessage = parsed.success_message || parsed.error_message || parsed.message || "";
+  } catch {
+    responseCode = responseText.trim().split(/\s+/)[0] || "";
+    providerMessage = responseText;
+  }
+  const failed = responseCode !== "202" || /error|invalid|failed|fail|insufficient|wrong|inactive/i.test(providerMessage);
+  const sent = status === 200 && !failed ? recipients.length : 0;
   return {
     sent,
     failed: recipients.length - sent,
-    errors: sent ? [] : [{ response: body.slice(0, 200) }],
+    errors: sent ? [] : [{ response: providerMessage || responseText.slice(0, 200), code: responseCode }],
   };
 };
 
@@ -144,6 +197,10 @@ const sendSmsMarketing = async ({ customers = "All", smsText }) => {
   const settings = await getSmsGatewaySettings();
   const gatewayType = settings?.type || "";
 
+  if (settings.status === false) {
+    throw new ApiError(503, "SMS gateway is disabled.");
+  }
+
   if (!gatewayType) {
     throw new ApiError(503, "SMS gateway is not configured. Please set up SMS gateway in Site Settings (settingType: sms_gateway).");
   }
@@ -170,4 +227,33 @@ const sendSmsMarketing = async ({ customers = "All", smsText }) => {
   };
 };
 
-module.exports = { sendSmsMarketing };
+const sendTransactionalSms = async (phone, smsText) => {
+  if (!phone) throw new ApiError(400, "Phone number is required");
+  if (!smsText?.trim()) throw new ApiError(400, "SMS text is required");
+
+  const settings = await getSmsGatewaySettings();
+  const gatewayType = settings?.type || "";
+  const recipients = [{ phone }];
+
+  if (settings.status === false || settings.otpVerification === false) {
+    throw new ApiError(503, "SMS gateway is disabled.");
+  }
+
+  if (!gatewayType) {
+    throw new ApiError(503, "SMS gateway is not configured. Please set up SMS gateway in Site Settings (settingType: sms_gateway).");
+  }
+
+  if (gatewayType === "ssl_wireless") {
+    return sendViaSslWireless(settings, recipients, smsText);
+  }
+  if (gatewayType === "bdbulksms") {
+    return sendViaBdBulkSms(settings, recipients, smsText);
+  }
+  if (gatewayType === "twilio") {
+    return sendViaTwilio(settings, recipients, smsText);
+  }
+
+  throw new ApiError(503, `Unsupported SMS gateway type: "${gatewayType}". Supported: ssl_wireless, bdbulksms, twilio`);
+};
+
+module.exports = { sendSmsMarketing, sendTransactionalSms };

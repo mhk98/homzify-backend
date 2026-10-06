@@ -54,6 +54,9 @@ const LEGACY_PERMISSION_ALIASES = {
 
 const LEGACY_TO_HOLYDEEN_PERMISSION_ALIASES = {
   overview: ["dashboard"],
+  order: ["orders"],
+  orders: ["orders"],
+  all_orders: ["orders"],
   sale: ["orders"],
   product: ["products"],
   item: ["products"],

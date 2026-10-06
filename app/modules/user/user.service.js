@@ -315,8 +315,15 @@ const refreshToken = async (token) => {
   }
 
   const newAccessToken = generateToken(user);
+  const plainUser = sanitizeUser(user);
+  const menuPermissions =
+    await RolePermissionService.getEffectiveMenuPermissions(user.role);
 
-  return { accessToken: newAccessToken };
+  return {
+    accessToken: newAccessToken,
+    user: plainUser,
+    menuPermissions,
+  };
 };
 
 const UserService = {
