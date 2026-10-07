@@ -142,7 +142,13 @@ test('delivery charge and advance are decided by the server', async () => {
     orderSource: 'Landing Page', tracking: { landingPageId: 7 }, customerDistrict: 'outside',
     items: [{ id: 2, name: 'Oud Offer', qty: 1 }],
   });
-  assert.equal(landing.deliveryCharge, 150);
+  // Landing pages use the panel delivery charges, not the landing page's own fields.
+  assert.equal(landing.deliveryCharge, 120);
+  const landingDhaka = await priceOrderItems({
+    orderSource: 'Landing Page', tracking: { landingPageId: 7 }, customerDistrict: 'inside',
+    items: [{ id: 2, name: 'Oud Offer', qty: 1 }],
+  });
+  assert.equal(landingDhaka.deliveryCharge, 80);
   // Landing offers follow the linked product's free shipping flag, for every selected item.
   const freeOffer = { id: 3, name: 'Free Attar Offer', qty: 1 };
   const landingFree = await priceOrderItems({
@@ -154,7 +160,7 @@ test('delivery charge and advance are decided by the server', async () => {
     orderSource: 'Landing Page', tracking: { landingPageId: 7 }, customerDistrict: 'outside',
     items: [freeOffer, { id: 2, name: 'Oud Offer', qty: 1 }],
   });
-  assert.equal(landingMixed.deliveryCharge, 150);
+  assert.equal(landingMixed.deliveryCharge, 120);
 });
 
 test('public orders must contain items', async () => {

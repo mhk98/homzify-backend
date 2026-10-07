@@ -151,14 +151,11 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
     };
   });
 
-  const regularData = parseObject(page.regularData);
+  // Landing pages charge the same delivery rates as the website (panel Delivery Charge settings).
   const outside = String(payload.customerDistrict || "").trim().toLowerCase() === "outside";
-  let deliveryCharge = 0;
-  if (!allFreeShipping) {
-    deliveryCharge = outside
-      ? toPositiveNumber(regularData.deliveryOutside, DEFAULT_OUTSIDE_DHAKA_CHARGE)
-      : toPositiveNumber(regularData.deliveryInside, DEFAULT_DHAKA_CHARGE);
-  }
+  const deliveryCharge = allFreeShipping
+    ? 0
+    : await getWebsiteDeliveryCharge(outside ? "outside" : "dhaka");
 
   return { ...payload, items, deliveryCharge };
 };
