@@ -127,16 +127,20 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
   const options = getLandingOptions(page);
   const products = await loadProducts(options.map((option) => option.linkedProductId).filter(Boolean));
 
+  let allFreeShipping = payload.items.length > 0;
+
   const items = payload.items.map((item) => {
     const byId = options.filter((option) => Number(option.productId) === Number(item.id));
     const option = byId.find((candidate) => candidate.name === item.name) || byId[0] ||
       options.find((candidate) => candidate.name === item.name);
     if (!option) {
       if (strict) throw new ApiError(400, `"${item.name || "Product"}" এই অফারে পাওয়া যাচ্ছে না`);
+      allFreeShipping = false;
       return item;
     }
     // Landing offers keep their own price; a single-variant product is still linked for stock.
     const product = option.linkedProductId && products.get(Number(option.linkedProductId));
+    if (!product?.freeShipping) allFreeShipping = false;
     const variation = product && product.variations?.length === 1 ? product.variations[0] : null;
     return {
       ...item,
@@ -149,9 +153,12 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
 
   const regularData = parseObject(page.regularData);
   const outside = String(payload.customerDistrict || "").trim().toLowerCase() === "outside";
-  const deliveryCharge = outside
-    ? toPositiveNumber(regularData.deliveryOutside, DEFAULT_OUTSIDE_DHAKA_CHARGE)
-    : toPositiveNumber(regularData.deliveryInside, DEFAULT_DHAKA_CHARGE);
+  let deliveryCharge = 0;
+  if (!allFreeShipping) {
+    deliveryCharge = outside
+      ? toPositiveNumber(regularData.deliveryOutside, DEFAULT_OUTSIDE_DHAKA_CHARGE)
+      : toPositiveNumber(regularData.deliveryInside, DEFAULT_DHAKA_CHARGE);
+  }
 
   return { ...payload, items, deliveryCharge };
 };

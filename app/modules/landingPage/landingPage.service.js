@@ -2,6 +2,7 @@ const { Op } = require("sequelize");
 const paginationHelpers = require("../../../helpers/paginationHelper");
 const db = require("../../../models");
 const ApiError = require("../../../error/ApiError");
+const { getLandingOptions } = require("../order/orderPricing");
 
 const LandingPage = () => db.landingPage;
 const Product = () => db.product;
@@ -233,7 +234,20 @@ const getPublicOneFromDB = async (id) => {
     paranoid: true,
   });
   if (!row) throw new ApiError(404, "Landing page not found or inactive");
-  return row;
+
+  // Linked products marked free shipping in the panel; the storefront drops the delivery
+  // charge when every selected option is one of these (same rule as order pricing).
+  const linkedIds = [...new Set(
+    getLandingOptions(row).map((option) => Number(option.linkedProductId)).filter((id) => id > 0),
+  )];
+  const freeShippingProductIds = linkedIds.length && Product()
+    ? (await Product().findAll({
+        where: { Id: { [Op.in]: linkedIds }, freeShipping: true },
+        attributes: ["Id"],
+        raw: true,
+      })).map((product) => Number(product.Id))
+    : [];
+  return { ...row.toJSON(), freeShippingProductIds };
 };
 
 const updateOneFromDB = async (id, payload) => {

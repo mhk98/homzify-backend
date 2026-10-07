@@ -33,7 +33,7 @@ function pricingDb() {
       return products.filter((product) => ids.includes(product.Id));
     } },
     landingPage: { async findOne() {
-      return { Id: 7, productId: 2, price: 999, regularData: JSON.stringify({ deliveryOutside: 150, productOptions: [{ productId: 2, name: 'Oud Offer', price: 850 }] }) };
+      return { Id: 7, productId: 2, price: 999, regularData: JSON.stringify({ deliveryOutside: 150, productOptions: [{ productId: 2, name: 'Oud Offer', price: 850 }, { productId: 3, name: 'Free Attar Offer', price: 350 }] }) };
     } },
     deliveryCharge: { async findAll() {
       return [{ note: 'ঢাকার ভিতরে ৮০ টাকা', amount: '80.00' }, { note: 'ঢাকার বাইরে ১২০ টাকা', amount: '120.00' }];
@@ -143,6 +143,18 @@ test('delivery charge and advance are decided by the server', async () => {
     items: [{ id: 2, name: 'Oud Offer', qty: 1 }],
   });
   assert.equal(landing.deliveryCharge, 150);
+  // Landing offers follow the linked product's free shipping flag, for every selected item.
+  const freeOffer = { id: 3, name: 'Free Attar Offer', qty: 1 };
+  const landingFree = await priceOrderItems({
+    orderSource: 'Landing Page', tracking: { landingPageId: 7 }, customerDistrict: 'outside',
+    items: [freeOffer],
+  });
+  assert.equal(landingFree.deliveryCharge, 0);
+  const landingMixed = await priceOrderItems({
+    orderSource: 'Landing Page', tracking: { landingPageId: 7 }, customerDistrict: 'outside',
+    items: [freeOffer, { id: 2, name: 'Oud Offer', qty: 1 }],
+  });
+  assert.equal(landingMixed.deliveryCharge, 150);
 });
 
 test('public orders must contain items', async () => {
